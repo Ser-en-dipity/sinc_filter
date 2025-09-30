@@ -1,3 +1,5 @@
+`timescale 1ns/1ps  // 添加timescale
+
 module dec256sinc24b (
     input mclk1,  /* used to clk filter */
     input reset,  /* used to reset filter */

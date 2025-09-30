@@ -1,0 +1,77 @@
+#include "Vtb_dec256sinc24b.h"
+#include "verilated.h"
+#include "verilated_vcd_c.h"
+#include <iostream>
+#include <memory>
+
+int main(int argc, char** argv) {
+    Verilated::commandArgs(argc, argv);
+    
+    std::cout << "开始Verilator仿真..." << std::endl;
+    
+    // 创建实例
+    auto top = std::make_unique<Vtb_dec256sinc24b>();
+    
+    // 启用波形跟踪
+    Verilated::traceEverOn(true);
+    VerilatedVcdC* vcd = new VerilatedVcdC;
+    top->trace(vcd, 99);
+    vcd->open("dec256sinc24b.vcd");
+    
+    // 初始化信号
+    top->reset = 1;
+    top->dec_rate = 256;
+    
+    int64_t main_time = 0;
+    const int64_t MAX_SIM_TIME = 2000000; // 2ms
+    
+    std::cout << "仿真运行中..." << std::endl;
+    
+    while (main_time < MAX_SIM_TIME) {
+        // 推进时间
+        main_time++;
+        
+        // 在适当的时间点评估模型
+        if (main_time % 5 == 0) {
+            top->eval();
+        }
+        
+        // 记录波形（每10ns记录一次以减少文件大小）
+        if (main_time % 10 == 0) {
+            vcd->dump(main_time);
+        }
+        
+        // 控制逻辑
+        if (main_time == 100) {
+            top->reset = 0; // 释放复位
+            std::cout << "复位释放 at time " << main_time << " ns" << std::endl;
+        }
+        
+        // 监控数据输出
+        if (top->data_en) {
+            std::cout << "时间: " << main_time << " ns, 输出数据: 0x" 
+                      << std::hex << top->DATA << std::dec 
+                      << ", 降采样率: " << top->dec_rate << std::endl;
+        }
+        
+        // 简单结束条件：运行足够长时间
+        if (main_time > 1000000) { // 1ms后结束
+            std::cout << "仿真完成" << std::endl;
+            break;
+        }
+        
+        // 防止无限循环
+        if (main_time >= MAX_SIM_TIME) {
+            std::cout << "达到最大仿真时间" << std::endl;
+            break;
+        }
+    }
+    
+    // 清理
+    vcd->close();
+    top->final();
+    delete vcd;
+    
+    std::cout << "仿真结束，总时间: " << main_time << " ns" << std::endl;
+    return 0;
+}

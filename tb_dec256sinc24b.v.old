@@ -1,0 +1,167 @@
+`timescale 1ns/1ps
+
+module tb_dec256sinc24b;
+    // 时钟和复位信号
+    reg mclk1; // 输入adc时钟
+    reg mclk2; // 测试时钟
+    reg reset;
+    
+    // 输入信号
+    reg mdata1;
+    reg [15:0] dec_rate;
+    
+    // 输出信号
+    wire [15:0] DATA;
+    wire data_en;
+    
+    // 测试参数
+    parameter SIM_CYCLES = 100000;
+    
+    // 实例化被测模块
+    dec256sinc24b uut (
+        .mclk1(mclk1),
+        .reset(reset),
+        .mdata1(mdata1),
+        .DATA(DATA),
+        .data_en(data_en),
+        .dec_rate(dec_rate)
+    );
+    
+    // 时钟生成 - 20MHz时钟 (周期50ns)
+    initial begin
+        mclk1 = 0;
+        forever #25 mclk1 = ~mclk1; // 20MHz时钟，半周期25ns
+        mclk2 = 0;
+        forever #50 mclk2 = ~mclk2; // 
+    end
+    
+    // 16位ΔΣ调制器模拟
+    reg [16:0] sigma_delta_accumulator;
+    reg [16:0] pwm_value;
+    reg [31:0] clock_counter;
+    
+    always @(posedge mclk1 or posedge reset) begin
+        if (reset) begin
+            sigma_delta_accumulator = 17'd0;
+            mdata1 <= 1'b0;
+            clock_counter <= 32'd0;
+            pwm_value <= 17'd300; // 16位中间值，对应50%占空比
+        end else begin
+            clock_counter <= clock_counter + 32'd1;
+            
+            // 16位ΔΣ调制器
+            sigma_delta_accumulator = sigma_delta_accumulator + pwm_value;
+            if (sigma_delta_accumulator[16]) begin // 检查最高位(第16位)
+                mdata1 <= 1'b1;
+                sigma_delta_accumulator = sigma_delta_accumulator - 17'd65535 ; // 溢出后清零,误差忽略
+            end else begin
+                mdata1 <= 1'b0;
+            end
+        end
+    end
+    
+    // 测试序列控制 - 简化版本，主要测试dec_rate=256
+    reg [2:0] test_phase;
+    
+    always @(posedge mclk1 or posedge reset) begin
+        if (reset) begin
+            test_phase <= 3'd0;
+            dec_rate <= 16'd256; // 固定降采样率为256
+        end else begin
+            case (test_phase)
+                3'd0: begin // 初始阶段
+                    if (clock_counter > 32'd100) begin
+                        test_phase <= 3'd1;
+                        $display("进入稳定测试阶段");
+                    end
+                end
+                // 3'd1: begin // 稳定测试阶段，改变PWM值测试不同输入
+                //     if (clock_counter == 32'd10000) begin
+                //         pwm_value <= 17'd16384; // 25%占空比
+                //         $display("改变PWM值为25%%占空比");
+                //     end
+                //     else if (clock_counter == 32'd30000) begin
+                //         pwm_value <= 17'd49152; // 75%占空比
+                //         $display("改变PWM值为75%%占空比");
+                //     end
+                //     else if (clock_counter == 32'd50000) begin
+                //         pwm_value <= 17'd6553; // 10%占空比
+                //         $display("改变PWM值为10%%占空比");
+                //     end
+                //     else if (clock_counter == 32'd70000) begin
+                //         pwm_value <= 17'd58982; // 90%占空比
+                //         $display("改变PWM值为90%%占空比");
+                //     end
+                // end
+                3'd2: begin // 完成
+                    if (clock_counter > SIM_CYCLES) begin
+                        $display("仿真完成于时钟周期: %d", clock_counter);
+                        $finish;
+                    end
+                end
+                default: begin
+                    test_phase <= 3'd2; // 安全状态
+                end
+            endcase
+            
+            // 自动进入完成阶段
+            if (clock_counter > SIM_CYCLES && test_phase != 3'd2) begin
+                test_phase <= 3'd2;
+            end
+        end
+    end
+    
+    // 初始化
+    initial begin
+        // VCD波形记录
+        $dumpfile("dec256sinc24b.vcd");
+        $dumpvars(0, tb_dec256sinc24b);
+        
+        // 初始化信号
+        reset = 1'b1;
+        dec_rate = 16'd256; // 固定降采样率256
+        mdata1 = 1'b0;
+        
+        $display("开始仿真 - 20MHz时钟，16位ΔΣ调制器，降采样率256");
+        $display("初始PWM值: %d (50%%占空比)", 32768);
+        
+        // 延迟后释放复位
+        #200; // 延长复位时间以适应20MHz时钟
+        reset = 1'b0;
+        $display("复位释放，开始正常操作");
+        
+        // 设置仿真超时
+        #(SIM_CYCLES * 50); // 根据20MHz时钟调整超时时间
+        $display("仿真超时");
+        $finish;
+    end
+    
+    // 监控输出 - 只在数据使能时显示
+    integer output_count = 0;
+    always @(posedge data_en) begin
+        output_count <= output_count + 1;
+        $display("输出[%0d]: 时钟周期: %d, 输出数据: %h (十进制: %d), 当前PWM: %d", 
+                 output_count, clock_counter, DATA, DATA, pwm_value);
+        
+        // 每16个输出换行显示
+        if (output_count % 16 == 0) begin
+            $display(""); // 空行分隔
+        end
+    end
+
+    // 定期状态报告
+    always @(posedge mclk1) begin
+        if (clock_counter % 50000 == 0 && clock_counter > 0) begin
+            $display("状态报告 - 时钟周期: %d, 当前PWM: %d", clock_counter, pwm_value);
+        end
+    end
+
+    // 结束检查
+    always @(posedge mclk1) begin
+        if (clock_counter >= SIM_CYCLES) begin
+            $display("达到最大仿真周期: %d", SIM_CYCLES);
+            $display("总输出数据个数: %d", output_count);
+            $finish;
+        end
+    end
+endmodule
