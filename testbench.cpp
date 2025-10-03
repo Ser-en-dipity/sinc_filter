@@ -72,7 +72,7 @@ public:
     }
     
     void generate_sine_pwm(double freq_hz, double amplitude, int duration_ticks) {
-        double time_step = 0.1;
+        double time_step = 1e-9;
         double phase = 0.0;
         double phase_increment = 2.0 * M_PI * freq_hz * time_step;
         
@@ -80,21 +80,21 @@ public:
         for (int i = 0; i < duration_ticks; i++) {
             double sine_value = amplitude * sin(phase);
             double pwm_threshold = (sine_value + 1.0) / 2.0;
-            int random_val = rand() % MAX_ADC_VALUE;
-            dut->mdata1 = (random_val < pwm_threshold * MAX_ADC_VALUE) ? 1 : 0;
-            
+            double carrier_value = fmod((i * time_step * freq_hz), 1.0);
+            dut->mdata1 = (carrier_value < pwm_threshold) ? 1 : 0;
+
             phase += phase_increment;
             if (phase >= 2.0 * M_PI) phase -= 2.0 * M_PI;
             
             tick();
         }
     }
-    
+
     void run_tests() {
         std::cout << "=== Sinc滤波器测试开始 ===" << std::endl;
         
         reset();
-        
+        generate_sine_pwm(1000, 5, 100000);
         
         std::cout << "\n=== 测试完成 ===" << std::endl;
     }
